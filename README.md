@@ -20,7 +20,7 @@ you stay in control of every change.
 - **Live team status.** See who is active, idle, or offline, and what is waiting for you.
 - **Works in plain Pi and in Gentle Shell.** No server and no account: everything is local files.
 
-> Status: early development (0.1.2). Requires Node.js 23.6 or later.
+> Status: early development (0.2.0). Requires Node.js 23.6 or later.
 
 ## Contents
 
@@ -250,20 +250,25 @@ of it.
 
 While a session is bound, it shows the team at a glance.
 
-**In Gentle Shell**, the right panel's **Integrations** section shows:
+**In Gentle Shell**, a **TEAMS** section in the fullscreen rail shows this member,
+all members with colored presence, waiting approvals, and the two most recently active
+requests (including closed requests), colored by state. `👥` and the accent color mark
+the name of this session's team; `★` marks this member; `●` is active, `◐` idle, and `○`
+offline. For example:
 
 ```text
-teams: shop · ★ frontend
-● frontend  ◐ backend  ○ docs
-▸ Add invoice endpoint · in_progress
+▾ TEAMS              👥 shop
+  ● frontend ★
+  ◐ backend
+  ○ docs
+  ▸ Add invoice endpoint · in_progress
 ```
 
-- `★` is this session's member; `●` active, `◐` idle, `○` offline.
-- The last line shows approvals waiting for you first (`⚠ 1 approval waiting`), otherwise
-  the most recent open request, and disappears when there is none.
-
-**In plain Pi**, the same entries appear on one line in the footer, shortened to fit the
-terminal width.
+When the section is unavailable, the entries appear in **Integrations** instead. The
+rail integration uses an internal Gentle Shell interface that may change; if it is
+unavailable or incompatible, the plugin falls back to Integrations. Integrations strips
+colors. **In plain Pi**, the entries appear in the footer with theme colors, shortened to
+fit the terminal width.
 
 ## Configuration
 

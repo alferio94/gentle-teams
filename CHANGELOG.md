@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.0] - 2026-11-05
+
+- A TEAMS section in Gentle Shell's right panel: members colored by presence (active,
+  idle, offline), waiting approvals, and the two most recent requests colored by state.
+  While it shows, the Integrations entries are hidden; they come back when it cannot be
+  shown. It uses an internal Gentle Shell interface and falls back if that changes.
+- The team name is marked with 👥 and the accent color.
+- In plain Pi, the footer status is colored and shows the two most recent requests.
+
 ## [0.1.2] - 2026-11-05
 
 - A new animated banner for the README: the windows slide in, the connections draw

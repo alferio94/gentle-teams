@@ -21,6 +21,9 @@ import { createTeamSession, gitRoot, type TeamSession } from "../lib/session.ts"
 import { defaultRoot, openStore } from "../lib/store.ts";
 import { createAgentTools } from "../lib/tools.ts";
 import type { ScreenTheme } from "../lib/ui/teams-screen.ts";
+import { attachGentleShellRail, type RailAttachment } from "../lib/ui/gentle-shell-rail.ts";
+import { renderTeamPanel } from "../lib/ui/team-panel.ts";
+import type { TeamSnapshot, StatusTheme } from "../lib/team-status.ts";
 import { createScreenComponent, runTeamsCommand, type ScreenResult } from "../lib/teams-command.ts";
 
 export interface TeamsExtensionOptions {
@@ -37,6 +40,11 @@ export default createTeamsExtension();
 
 function teams(pi: ExtensionAPI, root: string): void {
 	let session: TeamSession | undefined;
+	let rail: RailAttachment | undefined;
+	let snapshot: TeamSnapshot | undefined;
+	let finishUi: (() => void) | undefined;
+	let theme: StatusTheme | undefined;
+	let attachPanel: (() => void) | undefined;
 	// openStore only resolves paths; nothing touches the filesystem until a call.
 	const store = openStore(root);
 	// S17: defaults until session_start reads the config file.
@@ -110,8 +118,20 @@ function teams(pi: ExtensionAPI, root: string): void {
 		} catch (error) {
 			if (ctx.hasUI) ctx.ui.notify(`teams: migration from the previous version failed; the original data was not modified: ${error instanceof Error ? error.message : String(error)}`, "error");
 		}
+		if (ctx.hasUI && ctx.mode === "tui") {
+			void ctx.ui.custom<void>((tui, activeTheme, _keys, done) => {
+				theme = activeTheme;
+				finishUi = () => done(undefined);
+				const panel = { render: (width: number) => snapshot ? renderTeamPanel(snapshot, activeTheme, width) : [], invalidate() {}, digest: () => JSON.stringify(snapshot) };
+				attachPanel = () => { if (!rail && snapshot) rail = attachGentleShellRail(tui, panel); };
+				return { render: () => [], invalidate() {} };
+			}, { overlay: true, overlayOptions: { nonCapturing: true, visible: () => false } }).catch(() => {});
+		}
 		const current = createTeamSession({
 			store,
+			onSnapshot: (next) => { snapshot = next; if (next) { attachPanel?.(); rail?.invalidate(); } else { rail?.dispose(); rail = undefined; } },
+			isPanelActive: () => rail?.isActive() ?? false,
+			statusTheme: () => theme,
 			sessionId: ctx.sessionManager.getSessionId(),
 			pid: process.pid,
 			// Peer content only ever reaches the model as a custom message (S9).
@@ -149,5 +169,7 @@ function teams(pi: ExtensionAPI, root: string): void {
 		session = undefined;
 		questionMode.reset();
 		await current?.shutdown();
+		rail?.dispose(); rail = undefined;
+		finishUi?.(); finishUi = undefined; attachPanel = undefined; theme = undefined; snapshot = undefined;
 	});
 }

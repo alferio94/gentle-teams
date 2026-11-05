@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readdir, readFile, rename, rm, utimes, writeFile } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openStore, type Store } from "../lib/store.ts";
+import { attachGentleShellRail } from "../lib/ui/gentle-shell-rail.ts";
 import { openPresence, OFFLINE_AFTER_MS } from "../lib/presence.ts";
 import { removeRequests } from "../lib/prune.ts";
 import { createTeamSession, MISSING_GRACE_MS, STATUS_KEY, type SessionPorts, type PeerMessage, type SendOptions } from "../lib/session.ts";
@@ -111,6 +112,56 @@ const within = <T>(promise: Promise<T>, ms = 2000): Promise<T> =>
 	Promise.race([promise, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out")), ms).unref())]);
 const exists = async (path: string) => readFile(path).then(() => true, () => false);
 const BIND_TITLE = "This repository is a member of a team. Bind this session to it?";
+
+test("S33 replaced footer with nondelegating digest immediately restores status", async () => {
+ const h = await harness(); let clock = 0;
+ const original = { render: (_width: number) => ["host"], invalidate() {}, digest: () => "host" };
+ const state = { active: true, ownsHost: () => true, parts: new Map([["footer", original]]) };
+ const tui = { mode: "fullscreen", terminal: { [Symbol.for("gentle-pi.experimental-sidebar.state")]: state }, requestRender() {} };
+ const rail = attachGentleShellRail(tui, { render: () => ["panel"], invalidate() {} }, () => clock)!;
+ const wrapper = state.parts.get("footer")!;
+ try {
+  const session = createTeamSession(h.ports({ isPanelActive: () => rail.isActive() }));
+  await session.bindTo(WS, "backend");
+  assert.equal(h.statusEntries.find(([key, text]) => key === "gentle-teams.1" && text), undefined);
+  wrapper.render(20);
+  state.parts.set("footer", { render: () => ["replacement"], invalidate() {}, digest: () => "replacement" });
+  await session.deliverNow();
+  assert.equal(h.statusEntries.filter(([key]) => key === "gentle-teams.1").at(-1)?.[1], `teams: 👥 ${WS} · ★ backend`);
+  await session.shutdown(); rail.dispose();
+ } finally { await h.done(); }
+});
+
+test("S33 active panel clears fallback and inactive panel republishes it", async () => {
+ const h = await harness(); let active = false;
+ try {
+  const session = createTeamSession(h.ports({ isPanelActive: () => active }));
+  await session.bindTo(WS, "backend");
+  assert.ok(h.statusEntries.some(([k,v]) => k === "gentle-teams.1" && v));
+  active = true; await session.deliverNow();
+  assert.deepEqual(h.statusEntries.filter(([k]) => k === "gentle-teams.1").at(-1), ["gentle-teams.1", undefined]);
+  active = false; await session.deliverNow();
+  assert.equal(h.statusEntries.filter(([k]) => k === "gentle-teams.1").at(-1)?.[1], `teams: 👥 ${WS} · ★ backend`);
+  await session.shutdown();
+ } finally { await h.done(); }
+});
+
+test("S31 snapshot publishes two recent party requests and clears on unbind", async () => {
+ const h = await harness();
+ try {
+  const snapshots: any[] = [];
+  const session = createTeamSession(h.ports({ onSnapshot: (snapshot) => snapshots.push(snapshot) }));
+  const request = await h.store.createRequest(WS, { from: "backend", to: "frontend", kind: "question", title: "Closed", body: "" });
+  await h.store.appendEvent(WS, request.id, { actor: "frontend", transition: "complete", summary: "done" });
+  await session.bindTo(WS, "backend");
+  assert.equal(snapshots.at(-1).team, WS);
+  assert.equal(snapshots.at(-1).self, "backend");
+  assert.deepEqual(snapshots.at(-1).recentRequests.map((r: any) => [r.title, r.state, r.direction]), [["Closed", "completed", "sent"]]);
+  await session.unbind();
+  assert.equal(snapshots.at(-1), undefined);
+  await session.shutdown();
+ } finally { await h.done(); }
+});
 
 test("S28 history prevents redelivery after injection before cursor save", async () => {
 	const h = await harness();
@@ -349,7 +400,7 @@ test("S7/S10 binding claims presence, starts a 5 s heartbeat and a watcher, and 
 		assert.equal(h.sent[0]!.message.details.delivery, "incoming-question");
 		assert.match(h.sent[0]!.message.content, /^Untrusted peer data from member "frontend" in team "tienda-online"\./);
 		assert.deepEqual(await readJsonFile(join(h.root, "teams", WS, "cursors", "backend.json")), { version: 1, seen: { [q.id]: 1 } });
-		assert.ok(h.statusEntries.some(([key, text]) => key === "gentle-teams.1" && text === "teams: tienda-online · ★ backend"));
+		assert.ok(h.statusEntries.some(([key, text]) => key === "gentle-teams.1" && text === "teams: 👥 tienda-online · ★ backend"));
 		await session.shutdown();
 	} finally {
 		await h.done();
@@ -492,7 +543,7 @@ test("S23 status entries are cached, refreshed on heartbeat and cleared on shutd
 		const session = createTeamSession(h.ports());
 		await session.bindTo(WS, "backend");
 		assert.ok(h.statusEntries.some(([key, text]) => key === "gentle-teams" && text === undefined));
-		assert.ok(h.statusEntries.some(([key, text]) => key === "gentle-teams.1" && text === "teams: tienda-online · ★ backend"));
+		assert.ok(h.statusEntries.some(([key, text]) => key === "gentle-teams.1" && text === "teams: 👥 tienda-online · ★ backend"));
 		assert.ok(h.statusEntries.some(([key, text]) => key === "gentle-teams.2" && text === "◐ backend  ○ frontend"));
 		const count = h.statusEntries.length;
 		await h.watchers[0]!.trigger();
@@ -589,7 +640,7 @@ test("S8 'later' keeps the change pending, is not re-prompted this session, and 
 		assert.equal((await h.store.readRequest(WS, c.id)).state, "requested");
 		assert.deepEqual((await h.store.readRequest(WS, c.id)).events, []);
 		assert.deepEqual(h.sent, []);
-		assert.ok(h.statusEntries.some(([key, text]) => key === "gentle-teams.3" && text === "⚠ 1 approval waiting"));
+		assert.ok(h.statusEntries.some(([key, text]) => key === "gentle-teams.3" && text?.startsWith("⚠ 1 approval waiting")));
 		await h.watchers[0]!.trigger();
 		assert.equal(h.selects.length, 2, "no second prompt in the same session");
 		await first.shutdown();

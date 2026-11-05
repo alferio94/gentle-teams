@@ -61,7 +61,7 @@ import { HEARTBEAT_INTERVAL_MS, openPresence, type PresenceState } from "./prese
 import { ageText, countText, pruneCandidates, removeRequests } from "./prune.ts";
 import type { ApprovalAnswer } from "./question-mode.ts";
 import { NOT_BOUND_MESSAGE } from "./tools.ts";
-import { formatTeamStatus, TEAM_STATUS_KEYS } from "./team-status.ts";
+import { formatTeamStatus, TEAM_STATUS_KEYS, type TeamSnapshot, type StatusTheme } from "./team-status.ts";
 import { plainLine } from "./ui/text.ts";
 import { watchTeam } from "./watcher.ts";
 import { teamDir, TeamStoreError, type RequestRecord, type RequestView, type Store } from "./store.ts";
@@ -93,6 +93,9 @@ export interface SessionUi {
 export interface SessionPorts {
 	store: Store;
 	sessionId: string;
+	onSnapshot?: (snapshot: TeamSnapshot | undefined) => void;
+	isPanelActive?: () => boolean;
+	statusTheme?: () => StatusTheme | undefined;
 	pid?: number;
 	now?: () => number;
 	/** Pi's `sendMessage`. The session never sends user messages. */
@@ -260,6 +263,7 @@ export function createTeamSession(ports: SessionPorts): TeamSession {
 		stopHeartbeat = undefined;
 		stopWatcher = undefined;
 		binding = undefined;
+		ports.onSnapshot?.(undefined);
 		clearStatus();
 		for (const controller of changeDialogs.values()) controller.abort();
 		for (const { controller } of approvalDialogs.values()) controller.abort();
@@ -661,8 +665,10 @@ export function createTeamSession(ports: SessionPorts): TeamSession {
 				approvals += (await listPendingApprovals(store, team, view.record.id).catch(() => [] as ApprovalRecord[])).length;
 			}
 			if (binding !== current) return;
-			for (const [key, text] of formatTeamStatus({ team, self: alias, members, pendingApprovals: awaiting + approvals,
-				requests: partyViews.map(({ record, events, state }) => ({ title: record.title, state, lastActivity: events.at(-1)?.at ?? record.createdAt })) })) publish(key, text);
+			const requests = partyViews.map(({ record, events, state }) => ({ title: record.title, state, direction: record.from === alias ? "sent" as const : "received" as const, lastActivity: events.at(-1)?.at ?? record.createdAt })).sort((a, b) => b.lastActivity.localeCompare(a.lastActivity)).slice(0, 2);
+			const snapshot: TeamSnapshot = { team, self: alias, members, pendingApprovals: awaiting + approvals, recentRequests: requests };
+			ports.onSnapshot?.(snapshot);
+			for (const [key, text] of formatTeamStatus({ ...snapshot, requests }, ports.statusTheme?.())) publish(key, ports.isPanelActive?.() ? undefined : text);
 		} catch (error) {
 			ui?.notify(`teams: delivery failed: ${message(error)}`, "error");
 		}

@@ -444,12 +444,22 @@ Tools fail closed. A failure is an error result (`isError: true`) whose text is
 Modeled on `/gentle:profiles`: tabs per team, a highlighted "This session" row,
 a members table, action buttons, and a keybinding footer.
 
-While bound, Gentle Shell's Integrations rail displays ordered `setStatus` entries
-`gentle-teams.1` (team and ★ self), `gentle-teams.2` (members sorted by alias with ● active,
-◐ idle, ○ offline), and `gentle-teams.3` (approvals waiting, otherwise the most recent
-open request involving this member). The third entry is omitted when neither exists.
-Watcher passes and heartbeats refresh changed entries; unbinding and shutdown clear them.
-The compact footer may omit trailing entries when space runs out.
+While bound, a single in-memory snapshot feeds the TEAMS rail section and the status
+fallback. The section lists self, members with colored presence, waiting approvals, and
+the two most recently active party requests, including closed requests. It uses a
+feature-detected internal Gentle Shell interface, which may change; missing or incompatible
+hosts fall back to ordered `setStatus` entries `gentle-teams.1..3` in Integrations. Those
+entries are cleared while the section is active, and restored on refresh when it is not.
+When another extension wraps the footer, a synchronous digest probe detects whether it
+still delegates to this panel without rendering. If the digest is absent or throws,
+reachability falls back to whether the panel rendered in the last ten seconds.
+Integrations strips colors; plain Pi's footer retains theme colors and may omit trailing
+entries when space runs out. Watcher passes and heartbeats refresh the snapshot; unbinding
+and shutdown clear the entries.
+
+**Known limitations:** The TUI is obtained through a non-capturing, invisible
+`ctx.ui.custom` overlay kept open for the session, as in mcp-sidebar. Pi reports one
+long `ui_prompt_start` span; Gentle Shell 4.6 does not listen to it.
 
 ```
  tienda-online ★ ▾    api-pagos ⊙    + New
