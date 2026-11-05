@@ -241,11 +241,13 @@ is asked in the recipient session; the requester only sees the state.
 
 Each session's plugin instance:
 
-1. On `session_start`: resolve the Git root of `cwd`. If it matches a member of a
-   team, ask the human whether to resume that role. Never bind silently; a
-   session without UI (`ctx.hasUI` false) does not bind. Binding fails with
-   `member-bound` (`Member "<alias>" is bound to another live session.`) while
-   another session's heartbeat is fresh; an offline holder is taken over. Right after
+1. On `session_start`: agent children (`GENTLE_PI_AGENTS_CHILD=1`) do not start a
+   team session. Otherwise resolve the Git root and offer only members without a fresh
+   heartbeat. If none are free, return `member-bound` without prompting. The human's
+   binding or decline is remembered per repository in this process: later sessions
+   rebind the same member if free, or retain the decline; a fresh process asks again.
+   A session without UI (`ctx.hasUI` false) does not bind. A concurrent claim can
+   still fail with `member-bound`; an offline holder is taken over. Right after
    binding, the session withdraws (records `withdrawn`) its own undecided approvals a
    previous process of this member left behind, so the requester never shows a
    dialog nobody waits for, then runs the history cleanup (§3.1). The requester's
@@ -520,7 +522,8 @@ feedback line):
   session opened in that repository (each session decides for its own repository).
   D2 errors such as
   `open-requests` are shown verbatim and nothing changes. Leaving the member this
-  session is bound to unbinds it.
+  session is bound to unbinds it. A successful leave clears the remembered decision,
+  so the next startup asks again if another membership exists.
 - `r` **Requests**: every request of the team (short id, kind, from → to,
   one-line title, state). `enter` shows the event history (`↑↓` move through its events, `›` marks the
   selected one); `esc` goes back. A change
@@ -538,10 +541,8 @@ feedback line):
   `Remove N closed requests older than 7 days from "<ws>"?`; cancel removes nothing
   (`Clean-up cancelled; nothing changed.`), confirm removes those still eligible and
   reports `Removed N closed requests from "<ws>".`
-- The session-start bind prompt (§5) labels members held by another live session,
-  e.g. `tienda-online as backend (in use by another live session)`; they stay
-  selectable (the claim fails with `member-bound`, or takes over if the holder went
-  offline meanwhile).
+- The session-start bind prompt (§5) omits members held by another live session;
+  a stale heartbeat makes the member available again.
 - A session binds to **one team at a time**. A repository may be a member of
   several teams; the session chooses which one it acts in.
 - A member has **at most one bound session**. A second session in the same

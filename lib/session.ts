@@ -5,7 +5,7 @@
  * extension (extensions/teams.ts) only wires Pi events to this object.
  *
  * - start(cwd): resolve the Git root, find member roles for it, ask the human which
- *   one to bind (never silently), claim presence, start heartbeat and watcher, and
+ *   one to bind (or reuse the process's previous decision), claim presence, start heartbeat and watcher, and
  *   run a delivery pass.
  * - Delivery passes are serialized. Each delivery advances the persisted cursor only
  *   after it succeeded. Incoming changes are offered to the human in a separate
@@ -75,7 +75,6 @@ export const MISSING_GRACE_MS = 60_000;
 export const BIND_TITLE = "This repository is a member of a team. Bind this session to it?";
 export const DO_NOT_BIND = "Do not bind";
 export const CHANGE_CHOICES = ["Accept", "Decline", "Later"] as const;
-export const IN_USE_SUFFIX = " (in use by another live session)";
 const PROMPT_BODY_MAX = 2000;
 
 export interface SendOptions {
@@ -92,6 +91,8 @@ export interface SessionUi {
 
 export interface SessionPorts {
 	store: Store;
+	/** Override the process-wide decisions for isolated tests. */
+	decisions?: Map<string, Binding | "declined">;
 	sessionId: string;
 	onSnapshot?: (snapshot: TeamSnapshot | undefined) => void;
 	isPanelActive?: () => boolean;
@@ -130,6 +131,7 @@ export type DecideOutcome =
 	| { ok: false; code: string; message: string };
 
 export interface TeamSession {
+	clearDecision(root: string): void;
 	readonly binding: { team: string; alias: string } | undefined;
 	start(cwd: string): Promise<StartOutcome>;
 	/**
@@ -202,7 +204,10 @@ interface Waiter {
 
 const answerOf = (decision: ApprovalDecision): ApprovalAnswer => (decision.choice === "withdrawn" ? "withdrawn" : decision.choice);
 
+const processDecisions = new Map<string, Binding | "declined">();
+
 export function createTeamSession(ports: SessionPorts): TeamSession {
+	const decisions = ports.decisions ?? processDecisions;
 	const { store, sessionId, ui } = ports;
 	const presence = openPresence(store, { now: ports.now, pid: ports.pid });
 	const now = ports.now ?? Date.now;
@@ -686,13 +691,15 @@ export function createTeamSession(ports: SessionPorts): TeamSession {
 	}
 
 	/** Install a claimed binding: heartbeat, watcher, status, first delivery pass. */
-	async function attach(picked: Binding): Promise<StartOutcome> {
+	async function attach(picked: Binding, root: string | undefined): Promise<StartOutcome> {
 		const shutDown = { bound: false, reason: "shut-down" } as const;
 		if (disposed) {
 			await presence.release(picked.team, picked.alias, sessionId).catch(() => false);
 			return shutDown;
 		}
 		binding = picked;
+		// Remember the human's choice before any delivery prompt can block startup.
+		if (root !== undefined) decisions.set(root, picked);
 		deferred.clear();
 		missingSince.clear();
 		reported.clear();
@@ -715,6 +722,7 @@ export function createTeamSession(ports: SessionPorts): TeamSession {
 	}
 
 	return {
+		clearDecision(root) { decisions.delete(root); },
 		get binding() {
 			return binding ? { ...binding } : undefined;
 		},
@@ -738,20 +746,24 @@ export function createTeamSession(ports: SessionPorts): TeamSession {
 			}
 			if (disposed) return shutDown;
 			if (candidates.length === 0) return { bound: false, reason: "no-membership" };
-			if (!ui) return { bound: false, reason: "no-ui" };
-
-			// S14: mark members another live session holds; they stay selectable (the claim
-			// reports member-bound, or takes over if the holder went offline meanwhile).
-			const labels: string[] = [];
+			const decision = decisions.get(root);
+			if (decision === "declined") return { bound: false, reason: "declined" };
+			const free: Binding[] = [];
 			for (const c of candidates) {
 				const held = await presence.status(c.team, c.alias).then((s) => s.online, () => false);
-				labels.push(`${c.team} as ${c.alias}${held ? IN_USE_SUFFIX : ""}`);
+				if (!held) free.push(c);
 			}
 			if (disposed) return shutDown;
-			const choice = await ui.select(BIND_TITLE, [...labels, DO_NOT_BIND]);
-			if (disposed) return shutDown;
-			const picked = choice === undefined ? undefined : candidates[labels.indexOf(choice)];
-			if (!picked) return { bound: false, reason: "declined" };
+			if (free.length === 0) return { bound: false, reason: "member-bound" };
+			if (!ui) return { bound: false, reason: "no-ui" };
+			let picked = decision && free.find((c) => c.team === decision.team && c.alias === decision.alias);
+			if (!picked) {
+				const labels = free.map((c) => `${c.team} as ${c.alias}`);
+				const choice = await ui.select(BIND_TITLE, [...labels, DO_NOT_BIND]);
+				if (disposed) return shutDown;
+				picked = choice === undefined ? undefined : free[labels.indexOf(choice)];
+				if (!picked) { decisions.set(root, "declined"); return { bound: false, reason: "declined" }; }
+			}
 
 			try {
 				await presence.claim(picked.team, picked.alias, { sessionId, state: presenceState() });
@@ -761,7 +773,7 @@ export function createTeamSession(ports: SessionPorts): TeamSession {
 				const bound = error instanceof TeamStoreError && error.code === "member-bound";
 				return { bound: false, reason: bound ? "member-bound" : "claim-failed" };
 			}
-			return attach(picked);
+			return attach(picked, root);
 		},
 
 		async bindTo(team, alias) {
@@ -770,18 +782,22 @@ export function createTeamSession(ports: SessionPorts): TeamSession {
 				if (binding.team === team && binding.alias === alias) return { bound: true, team, alias };
 				return { bound: false, reason: "already-bound" };
 			}
+			const member = (await store.listMembers(team)).find((m) => m.alias === alias);
 			await presence.claim(team, alias, { sessionId, state: presenceState() });
 			if (binding) {
 				// Another bind won while claiming: keep it, drop this claim.
 				await presence.release(team, alias, sessionId).catch(() => false);
 				return { bound: false, reason: "already-bound" };
 			}
-			return attach({ team, alias });
+			return attach({ team, alias }, member?.repositoryRoot);
 		},
 
 		async unbind() {
 			const current = binding;
 			if (!current) return false;
+			for (const [root, decision] of decisions) {
+				if (decision !== "declined" && decision.team === current.team && decision.alias === current.alias) decisions.delete(root);
+			}
 			await detach();
 			await presence.release(current.team, current.alias, sessionId).catch(() => false);
 			return true;

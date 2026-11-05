@@ -26,6 +26,10 @@ import { renderTeamPanel } from "../lib/ui/team-panel.ts";
 import type { TeamSnapshot, StatusTheme } from "../lib/team-status.ts";
 import { createScreenComponent, runTeamsCommand, type ScreenResult } from "../lib/teams-command.ts";
 
+export function isChildSession(): boolean {
+	return process.env.GENTLE_PI_AGENTS_CHILD === "1";
+}
+
 export interface TeamsExtensionOptions {
 	/** Store and config root; defaults to ~/.pi/multiagent. */
 	root?: string;
@@ -107,6 +111,8 @@ function teams(pi: ExtensionAPI, root: string): void {
 	pi.on("session_start", async (_event, ctx) => {
 		await session?.shutdown();
 		questionMode.reset();
+		session = undefined;
+		if (isChildSession()) return;
 		const config = await loadConfig(root);
 		questionMode.setReadOnlyTools(config.readOnlyTools);
 		pruneClosedAfterDays = config.pruneClosedAfterDays;

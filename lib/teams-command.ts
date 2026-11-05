@@ -42,6 +42,7 @@ export interface CommandSession {
 	readonly binding: { team: string; alias: string } | undefined;
 	bindTo(team: string, alias: string): Promise<StartOutcome>;
 	unbind(): Promise<boolean>;
+	clearDecision(root: string): void;
 	decide(requestId: string, choice: "Accept" | "Decline"): Promise<DecideOutcome>;
 	pruneRequests(team: string, ids: readonly string[], options: { days: number; now?: () => number }): Promise<string[]>;
 }
@@ -259,6 +260,7 @@ async function leave(ports: TeamsCommandPorts, place: ScreenPlace, team: string,
 		return at(verbatim(e)); // D2: e.g. open-requests; the store left everything unchanged.
 	}
 	const unbound = ownBinding && session ? await session.unbind() : false;
+	session?.clearDecision(root);
 	return {
 		team,
 		view: "members",

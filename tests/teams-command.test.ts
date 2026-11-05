@@ -63,6 +63,7 @@ async function harness(): Promise<Harness> {
 	});
 	h.session = createTeamSession({
 		store,
+		decisions: new Map(),
 		sessionId: "sess-back",
 		pid: process.pid,
 		now: () => T0,

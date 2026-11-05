@@ -39,6 +39,7 @@ async function harness(): Promise<Harness> {
 	await store.createTeam({ name: WS });
 	await store.joinMember(WS, { alias: "frontend", repositoryRoot: FRONT });
 	await store.joinMember(WS, { alias: "backend", repositoryRoot: BACK });
+	const decisions: NonNullable<SessionPorts["decisions"]> = new Map();
 	const h: Harness = {
 		store,
 		root,
@@ -54,6 +55,7 @@ async function harness(): Promise<Harness> {
 		failSend: { on: false },
 		ports: (overrides = {}) => ({
 			store,
+			decisions,
 			sessionId: "sess-back",
 			pid: 100,
 			now: () => h.clock.t,
@@ -407,17 +409,17 @@ test("S7/S10 binding claims presence, starts a 5 s heartbeat and a watcher, and 
 	}
 });
 
-test("S7 binding a member held by another live session fails with member-bound and changes nothing", async () => {
+test("S35b binding a member held by another live session fails with member-bound and changes nothing", async () => {
 	const h = await harness();
 	try {
 		await openPresence(h.store, { now: () => T0 }).claim(WS, "backend", { sessionId: "other" });
 		const before = await readFile(presenceFile(h, "backend"), "utf8");
 		await h.store.createRequest(WS, { from: "frontend", to: "backend", kind: "question", title: "Q", body: "" });
-		// S14: the prompt marks the live holder; selecting the member still tries to claim it.
-		h.answers.push("tienda-online as backend (in use by another live session)");
+		// A live holder is never offered.
 		const session = createTeamSession(h.ports());
 		assert.deepEqual(await session.start(BACK), { bound: false, reason: "member-bound" });
-		assert.deepEqual(h.notes, [{ message: 'Member "backend" is bound to another live session.', level: "error" }]);
+		assert.deepEqual(h.notes, []);
+		assert.deepEqual(h.selects, []);
 		assert.equal(await readFile(presenceFile(h, "backend"), "utf8"), before);
 		assert.deepEqual(h.sent, []);
 		assert.deepEqual(h.watchers, []);
@@ -645,11 +647,11 @@ test("S8 'later' keeps the change pending, is not re-prompted this session, and 
 		assert.equal(h.selects.length, 2, "no second prompt in the same session");
 		await first.shutdown();
 
-		h.answers.push("tienda-online as backend", undefined); // dismissing the prompt counts as later
+		h.answers.push(undefined); // dismissing the prompt counts as later
 		const second = createTeamSession(h.ports());
 		await second.start(BACK);
-		assert.equal(h.selects.length, 4);
-		assert.deepEqual(h.selects[3]!.options, CHANGE_OPTIONS);
+		assert.equal(h.selects.length, 3);
+		assert.deepEqual(h.selects[2]!.options, CHANGE_OPTIONS);
 		assert.equal((await h.store.readRequest(WS, c.id)).state, "requested");
 		await second.shutdown();
 	} finally {
@@ -842,19 +844,17 @@ test("S9 the change prompt keeps peer title and body preview on one line with fe
 	}
 });
 
-test("S14 the bind prompt marks members held by another live session; an offline holder is not marked", async () => {
+test("S35b the bind prompt excludes held members and offers offline members", async () => {
 	const h = await harness();
 	try {
 		await h.store.createTeam({ name: "api-pagos" });
 		await h.store.joinMember("api-pagos", { alias: "pay-back", repositoryRoot: BACK });
 		await openPresence(h.store, { now: () => T0 }).claim(WS, "backend", { sessionId: "other" });
-		h.answers.push("Do not bind");
+		h.answers.push("api-pagos as pay-back");
 		const first = createTeamSession(h.ports());
-		assert.deepEqual(await first.start(BACK), { bound: false, reason: "declined" });
-		assert.deepEqual(h.selects[0], {
-			title: BIND_TITLE,
-			options: ["api-pagos as pay-back", "tienda-online as backend (in use by another live session)", "Do not bind"],
-		});
+		assert.deepEqual(await first.start(BACK), { bound: true, team: "api-pagos", alias: "pay-back" });
+		assert.deepEqual(h.selects[0], { title: BIND_TITLE, options: ["api-pagos as pay-back", "Do not bind"] });
+		await first.unbind();
 
 		h.clock.t = T0 + OFFLINE_AFTER_MS + 1;
 		h.answers.push("tienda-online as backend");
@@ -865,6 +865,59 @@ test("S14 the bind prompt marks members held by another live session; an offline
 	} finally {
 		await h.done();
 	}
+});
+
+for (const method of ["start", "bindTo"] as const) {
+	test(`S35c ${method} remembers a binding before an open delivery prompt settles`, async () => {
+		const h = await harness();
+		let first: ReturnType<typeof createTeamSession> | undefined;
+		let second: ReturnType<typeof createTeamSession> | undefined;
+		try {
+			await h.store.createRequest(WS, { from: "frontend", to: "backend", kind: "change", title: "Pending", body: "" });
+			const ports = h.ports();
+			const dialogs: string[] = [];
+			const ui = { ...ports.ui!, select: async (title: string, options: string[], opts?: { signal?: AbortSignal }) => {
+				dialogs.push(title);
+				if (title === BIND_TITLE) return "tienda-online as backend";
+				return new Promise<string | undefined>((resolve) => opts?.signal?.addEventListener("abort", () => resolve(undefined), { once: true }));
+			} };
+			first = createTeamSession({ ...ports, ui });
+			const pending = method === "start" ? first.start(BACK) : first.bindTo(WS, "backend");
+			await until(() => dialogs.some((title) => title.startsWith("Change request")));
+			assert.equal((await readJsonFile(presenceFile(h, "backend"))).sessionId, "sess-back");
+			await first.shutdown();
+			assert.deepEqual(await within(pending), { bound: false, reason: "shut-down" });
+			const secondPorts = h.ports();
+			second = createTeamSession({ ...secondPorts, ui: { ...secondPorts.ui!, select: async (title, options) => {
+				dialogs.push(title);
+				return options.includes("Later") ? "Later" : "Do not bind";
+			} } });
+			assert.deepEqual(await within(second.start(BACK)), { bound: true, team: WS, alias: "backend" });
+			assert.equal(dialogs.filter((title) => title === BIND_TITLE).length, method === "start" ? 1 : 0);
+			assert.equal((await readJsonFile(presenceFile(h, "backend"))).sessionId, "sess-back");
+		} finally {
+			await first?.shutdown(); await second?.shutdown(); await h.done();
+		}
+	});
+}
+
+test("S35c decisions persist across session objects, and unbind clears them", async () => {
+	const h = await harness();
+	try {
+		h.answers.push("tienda-online as backend");
+		const first = createTeamSession(h.ports());
+		assert.equal((await first.start(BACK)).bound, true);
+		await first.shutdown();
+		const second = createTeamSession(h.ports());
+		assert.deepEqual(await second.start(BACK), { bound: true, team: WS, alias: "backend" });
+		assert.equal(h.selects.length, 1);
+		await second.unbind();
+		h.answers.push("Do not bind");
+		assert.deepEqual(await second.start(BACK), { bound: false, reason: "declined" });
+		const third = createTeamSession(h.ports());
+		assert.deepEqual(await third.start(BACK), { bound: false, reason: "declined" });
+		assert.equal(h.selects.length, 2);
+	} finally { await h.done(); }
 });
 
 test("S14 bindTo binds like the prompt; unbind releases presence and stops heartbeat and watcher", async () => {

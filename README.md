@@ -20,7 +20,7 @@ you stay in control of every change.
 - **Live team status.** See who is active, idle, or offline, and what is waiting for you.
 - **Works in plain Pi and in Gentle Shell.** No server and no account: everything is local files.
 
-> Status: early development (0.2.0). Requires Node.js 23.6 or later.
+> Status: early development (0.2.1). Requires Node.js 23.6 or later.
 
 ## Contents
 
@@ -102,8 +102,10 @@ before building the order page.
 The frontend agent sends a question with `multiagent_request`. The backend session wakes
 up, answers it read-only, and the answer arrives back in the frontend session.
 
-From then on, a session that starts in a member repository asks whether to bind to it, so
-you only join once.
+From then on, a session that starts in a member repository asks whether to bind to a free
+member, so you only join once. Your choice is remembered for this process across `/new`,
+`/resume`, `/reload`, and `/fork`; a new process asks again. Gentle Shell agent children
+never bind. Leaving clears the remembered choice, so the next startup can ask again.
 
 ## Use cases
 

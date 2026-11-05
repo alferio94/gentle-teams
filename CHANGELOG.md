@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1] - 2026-11-05
+
+- No more repeated "Bind this session" prompts: sessions started by an agent (subagents)
+  never bind or ask; a member already held by another live session is not offered; after
+  `/new`, `/resume`, `/reload`, or `/fork` a session keeps its choice without asking again.
+  Leaving a team clears that choice.
+
 ## [0.2.0] - 2026-11-05
 
 - A TEAMS section in Gentle Shell's right panel: members colored by presence (active,
