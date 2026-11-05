@@ -20,7 +20,7 @@ you stay in control of every change.
 - **Live team status.** See who is active, idle, or offline, and what is waiting for you.
 - **Works in plain Pi and in Gentle Shell.** No server and no account: everything is local files.
 
-> Status: early development (0.1.1). Requires Node.js 23.6 or later.
+> Status: early development (0.1.2). Requires Node.js 23.6 or later.
 
 ## Contents
 

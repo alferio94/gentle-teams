@@ -1,6 +1,6 @@
 {
   "name": "gentle-teams",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Let independent per-repository Pi sessions collaborate as a team.",
   "license": "MIT",

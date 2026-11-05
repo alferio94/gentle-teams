@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.2] - 2026-11-05
+
+- A new animated banner for the README: the windows slide in, the connections draw
+  themselves, messages travel between the repositories, and the approval check appears.
+  Pure SVG and CSS, 12 KB; it shows the complete banner when reduced motion is preferred.
+
 ## [0.1.1] - 2026-11-05
 
 - A banner for the project: an animated header in the README and a static image
