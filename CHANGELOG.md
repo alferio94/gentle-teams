@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.1] - 2026-11-05
+
+- A banner for the project: an animated header in the README and a static image
+  (`pi.image` in package.json) for package galleries such as Gentle Hub.
+
 ## [0.1.0] - 2026-11-04
 
 First release.

@@ -1,6 +1,6 @@
 {
   "name": "gentle-teams",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Let independent per-repository Pi sessions collaborate as a team.",
   "license": "MIT",
@@ -38,7 +38,8 @@
   "pi": {
     "extensions": [
       "extensions/teams.ts"
-    ]
+    ],
+    "image": "docs/images/banner.png"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
