@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    # Branch pushes only: a release tag points at a commit that main already tested.
+    branches: ["**"]
   pull_request:
 
 permissions:
@@ -10,6 +12,8 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # The suite takes about a minute; a hung test must fail fast instead of running for hours.
+    timeout-minutes: 15
     strategy:
       matrix:
         node: [24, 23]

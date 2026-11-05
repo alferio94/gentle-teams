@@ -219,7 +219,7 @@ test("S15 the first decision wins atomically: concurrent answers leave exactly o
 			assert.deepEqual(results[0]!.decision, winner, "the loser sees the winner's decision");
 			assert.deepEqual(results[1]!.decision, winner);
 			const dir = join(approvalsDir(root, q.id), a.approvalId);
-			assert.deepEqual(await readdir(dir), ["decision.json", "request.json"]);
+			assert.deepEqual((await readdir(dir)).sort(), ["decision.json", "request.json"]);
 			assert.deepEqual(await readJsonFile(join(dir, "decision.json")), winner);
 			assert.equal(await mode(join(dir, "decision.json")), 0o600);
 			assert.deepEqual(await readDecision(store, WS, q.id, a.approvalId), winner);
@@ -374,7 +374,7 @@ test("S15 concurrent answers in both terminals: exactly one decision; the loser 
 		const [approvalId] = await readdir(approvalsDir(t.root, t.q.id));
 		const dir = join(approvalsDir(t.root, t.q.id), approvalId!);
 		await until(() => t.backend.notes.length + t.frontend.notes.length === 1);
-		assert.deepEqual(await readdir(dir), ["decision.json", "request.json"]);
+		assert.deepEqual((await readdir(dir)).sort(), ["decision.json", "request.json"]);
 		const decision = await readJsonFile(join(dir, "decision.json"));
 		assert.equal(result, decision.choice, "the tool call follows the winning decision");
 		const loser = decision.decidedBy === "backend" ? t.frontend : t.backend;

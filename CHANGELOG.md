@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2] - 2026-11-05
+
+- CI no longer hangs: a multi-process test compared directory listings in a fixed order
+  (sorted on macOS, hash order on Linux) and, when it failed, left its child processes
+  running. Jobs now stop after 15 minutes, and release tags no longer start a duplicate run.
+  No change to the extension itself.
+
 ## [0.2.1] - 2026-11-05
 
 - No more repeated "Bind this session" prompts: sessions started by an agent (subagents)

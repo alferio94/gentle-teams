@@ -45,6 +45,8 @@ const until = async (predicate: () => Promise<boolean>, ms = 10000) => {
 
 test("S15 multi-process: two processes answering at once leave exactly one decision, 20 rounds", async () => {
 	const base = await mkdtemp(join(tmpdir(), "gentle-teams-mp-"));
+	// Children wait for go-<round> files; a failed round must not leave them waiting forever.
+	const spawned: ReturnType<typeof spawn>[] = [];
 	try {
 		const root = join(base, "multiagent");
 		const sync = join(base, "sync");
@@ -64,6 +66,7 @@ test("S15 multi-process: two processes answering at once leave exactly one decis
 			const child = spawn(process.execPath, ["--input-type=module", "-e", CHILD, root, WS, q.id, sync, who!, choice!, JSON.stringify(ids)], {
 				stdio: ["ignore", "ignore", "pipe"],
 			});
+			spawned.push(child);
 			let stderr = "";
 			child.stderr.on("data", (chunk) => (stderr += chunk));
 			const exited = new Promise<void>((resolve, reject) =>
@@ -72,6 +75,8 @@ test("S15 multi-process: two processes answering at once leave exactly one decis
 			return exited;
 		});
 
+		// Still awaited below; this only avoids an unhandled rejection when a round fails first.
+		for (const exited of children) exited.catch(() => undefined);
 		const winners: Record<string, number> = { backend: 0, frontend: 0 };
 		for (let round = 0; round < ROUNDS; round++) {
 			await writeFile(join(sync, `go-${round}`), "");
@@ -82,13 +87,15 @@ test("S15 multi-process: two processes answering at once leave exactly one decis
 			const winner = results.find((r) => r.won).decision;
 			for (const r of results) assert.deepEqual(r.decision, winner, `round ${round}: both see the winning decision`);
 			const dir = join(root, "teams", WS, "requests", q.id, "approvals", ids[round]!);
-			assert.deepEqual(await readdir(dir), ["decision.json", "request.json"], `round ${round}: one decision file, no temporary files`);
+			// readdir order is file-system specific (sorted on APFS, hash order on ext4).
+			assert.deepEqual((await readdir(dir)).sort(), ["decision.json", "request.json"], `round ${round}: one decision file, no temporary files`);
 			assert.deepEqual(JSON.parse(await readFile(join(dir, "decision.json"), "utf8")), winner);
 			winners[winner.decidedBy]!++;
 		}
 		await Promise.all(children);
 		assert.equal(winners.backend! + winners.frontend!, ROUNDS);
 	} finally {
+		for (const child of spawned) if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
 		await rm(base, { recursive: true, force: true });
 	}
 });
