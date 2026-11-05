@@ -31,6 +31,7 @@ you stay in control of every change.
 - [Configuration](#configuration)
 - [Security model](#security-model)
 - [Limitations](#limitations)
+- [Updating](#updating)
 - [Upgrading from pi-workspaces](#upgrading-from-pi-workspaces)
 - [Development](#development)
 
@@ -305,6 +306,33 @@ Read this before using the package.
 - The agent is never told the same event twice within one Pi session. Another session for
   the same member keeps its own history, and a crash while a message is queued but not yet
   recorded in the session can lose that message.
+
+## Updating
+
+Pi does not update packages on its own. Installed as shown in [Quick start](#quick-start),
+the package follows the `main` branch; update it with:
+
+```sh
+# Gentle Shell
+gentle-shell update git:github.com/alferio94/gentle-teams
+
+# Plain Pi
+pi update git:github.com/alferio94/gentle-teams
+```
+
+`--extensions` instead of the package source updates every installed package. On the next
+launch after an update, Pi shows what changed from [CHANGELOG.md](CHANGELOG.md) under
+"Extension Updates".
+
+To stay on one release, install a version tag; `update` never moves a pinned tag:
+
+```sh
+gentle-shell install git:github.com/alferio94/gentle-teams@v0.1.0
+```
+
+Every release has a `vX.Y.Z` tag and a
+[GitHub release](https://github.com/alferio94/gentle-teams/releases) with its notes.
+Restart the sessions of a team after updating, so every member runs the same version.
 
 ## Upgrading from pi-workspaces
 
