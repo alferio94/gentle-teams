@@ -647,6 +647,74 @@ test("S20 p with nothing to remove shows an info line and asks nothing", async (
 	}
 });
 
+test("archive confirmation names the team, cancellation preserves data, and success refreshes empty screen", async () => {
+	const h = await harness();
+	try {
+		await h.store.createTeam({ name: WS });
+		const before = await h.snapshot();
+		h.script = [["x"]];
+		h.confirmAnswers = [false];
+		await runTeamsCommand(h.ports());
+		assert.equal(h.confirms[0]?.title, `Archive team "${WS}"?`);
+		assert.match(h.confirms[0]!.message, /history.*preserved.*repositories are not deleted/i);
+		assert.equal(await h.snapshot(), before);
+		assert.deepEqual(lastFeedback(h), { text: "Archive cancelled; nothing changed.", level: "info" });
+		h.script = [["x"]];
+		h.confirmAnswers = [true];
+		await runTeamsCommand(h.ports());
+		assert.deepEqual(await h.store.listTeams(), []);
+		assert.deepEqual(h.shown.at(-1)?.tabs, []);
+		assert.equal(h.session.binding, undefined);
+	} finally { await h.done(); }
+});
+
+test("archive confirms and detaches the idle caller without closing its session", async () => {
+	const h = await harness();
+	try {
+		await withMembers(h);
+		await h.session.bindTo(WS, "backend");
+		h.script = [["x"]]; h.confirmAnswers = [true];
+		await runTeamsCommand(h.ports());
+		assert.match(h.confirms[0]!.message, /unbind.*all.*sessions/i);
+		assert.match(h.confirms[0]!.message, /current session/i);
+		assert.equal(h.session.binding, undefined);
+		assert.deepEqual(await h.store.listTeams(), []);
+		assert.deepEqual(await h.session.start("/not-git"), { bound: false, reason: "no-git" });
+	} finally { await h.done(); }
+});
+
+test("archive rechecks when an idle caller starts work during confirmation", async () => {
+	const h = await harness();
+	try {
+		await withMembers(h);
+		await h.session.bindTo(WS, "backend");
+		const ports = h.ports();
+		let afterStart = "";
+		ports.ui.confirm = async () => { await h.session.agentStart(); afterStart = await h.snapshot(); return true; };
+		h.script = [["x"]];
+		await runTeamsCommand(ports);
+		assert.deepEqual(h.session.binding, { team: WS, alias: "backend" });
+		assert.equal((await h.store.listTeams()).length, 1);
+		assert.match(lastFeedback(h)!.text, /member-bound/);
+		assert.equal(await h.snapshot(), afterStart);
+		assert.equal(await exists(join(h.root, "teams", WS, ".archived.json")), false);
+	} finally { await h.done(); }
+});
+
+test("archiving another team leaves the caller's binding untouched", async () => {
+	const h = await harness();
+	try {
+		await withMembers(h);
+		await h.store.createTeam({ name: "other" });
+		await h.store.joinMember("other", { alias: "backend", repositoryRoot: BACK });
+		await h.session.bindTo("other", "backend");
+		h.script = [["right", "x"]]; h.confirmAnswers = [true];
+		await runTeamsCommand(h.ports());
+		assert.deepEqual(h.session.binding, { team: "other", alias: "backend" });
+		assert.deepEqual((await h.store.listTeams()).map((team) => team.name), ["other"]);
+	} finally { await h.done(); }
+});
+
 test("S19 the screen component renders with the terminal height it is given", () => {
 	const state: ScreenState = { tabs: [], thisSession: {}, tab: 0, member: 0, view: "members", request: 0 };
 	let rows = 10;
