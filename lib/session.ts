@@ -314,15 +314,25 @@ export function createTeamSession(ports: SessionPorts): TeamSession {
 		let ok: boolean;
 		try {
 			ok = await presence.heartbeat(current.team, current.alias, { sessionId, state: presenceState() });
-		} catch {
-			return; // Lock contention or a transient error: the next beat retries.
+		} catch (error) {
+			if (!(error instanceof TeamStoreError && error.code === "unknown-team")) return; // Transient failure: retry.
+			if (binding !== current) return;
+			for (const [root, decision] of decisions) {
+				if (decision !== "declined" && decision.team === current.team && decision.alias === current.alias) decisions.delete(root);
+			}
+			await detach();
+			ui?.notify(`teams: team "${current.team}" is no longer active; this session is no longer bound.`, "warning");
+			return;
 		}
 		if (binding !== current) return;
 		if (ok) {
 			await deliverNow();
 			return;
 		}
-		void detach();
+		for (const [root, decision] of decisions) {
+			if (decision !== "declined" && decision.team === current.team && decision.alias === current.alias) decisions.delete(root);
+		}
+		await detach();
 		ui?.notify(`teams: member "${current.alias}" was taken over by another session; this session is no longer bound.`, "warning");
 	}
 
