@@ -268,6 +268,15 @@ async function leave(ports: TeamsCommandPorts, place: ScreenPlace, team: string,
 	};
 }
 
+async function archive(ports: TeamsCommandPorts, place: ScreenPlace, team: string): Promise<ScreenPlace> {
+	const ok = await ports.ui.confirm(`Archive team "${team}"?`, "Its history and configuration are preserved; repositories are not deleted. This will unbind all idle or disconnected sessions, including the current session if bound. No terminals or conversations are closed. Working sessions and open requests prevent archiving.");
+	if (!ok) return { ...place, feedback: info("Archive cancelled; nothing changed.") };
+	await ports.store.archiveTeam(team);
+	const session = ports.session();
+	if (session?.binding?.team === team) await session.unbind();
+	return { view: "members", feedback: info(`Archived team "${team}"; its history and repositories are preserved.`) };
+}
+
 async function decide(ports: TeamsCommandPorts, place: ScreenPlace, requestId: string, choice: "Accept" | "Decline"): Promise<ScreenPlace> {
 	const session = ports.session();
 	if (!session) return { ...place, feedback: error(NO_SESSION) };
@@ -330,6 +339,7 @@ export async function runTeamsCommand(ports: TeamsCommandPorts): Promise<void> {
 			else if (action.type === "join") place = await join(ports, place, action.team);
 			else if (action.type === "leave") place = await leave(ports, place, action.team, action.alias);
 			else if (action.type === "prune") place = await prune(ports, place, action.team);
+			else if (action.type === "archive") place = await archive(ports, place, action.team);
 			else place = await decide(ports, place, action.requestId, action.choice);
 		} catch (e) {
 			place = { ...place, feedback: verbatim(e) };

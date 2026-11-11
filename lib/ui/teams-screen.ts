@@ -111,12 +111,13 @@ export type ScreenAction =
 	| { type: "join"; team: string }
 	| { type: "leave"; team: string; alias: string }
 	| { type: "decide"; team: string; requestId: string; choice: "Accept" | "Decline" }
-	| { type: "prune"; team: string };
+	| { type: "prune"; team: string }
+	| { type: "archive"; team: string };
 
 export type KeyName = "left" | "right" | "up" | "down" | "enter" | "escape" | string;
 
 /** Fits 80 columns with its leading space (D3). */
-export const FOOTER = "←→ team  ↑↓ member  j join  l leave  r requests  p prune  n new  esc close";
+export const FOOTER = "←→ team ↑↓ member  j join l leave r requests p prune x archive n new esc close";
 
 const REQUESTS_FOOTER = "↑↓ request  enter history";
 const DECIDE_KEYS = "a accept  d decline";
@@ -443,6 +444,8 @@ export function handleKey(previous: ScreenState, key: KeyName): { state: ScreenS
 			return { state: { ...state, view: "requests", request: 0 } };
 		case "p":
 			return { state, action: { type: "prune", team: tab.name } };
+		case "x":
+			return { state, action: { type: "archive", team: tab.name } };
 		case "n":
 			return { state, action: { type: "new" } };
 		case "escape":

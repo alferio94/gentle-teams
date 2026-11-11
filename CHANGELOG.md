@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0] - 2026-11-11
+
+- Archive a team from `/teams` with `x` and a named confirmation. Idle or disconnected
+  sessions are unbound, including the current session when applicable; terminals,
+  conversations, repository folders, configuration and request history are preserved.
+- Working sessions and open requests prevent archive. The state is checked again after
+  confirmation under the same lock used by session activity and request admission.
+- Archived names remain reserved. Updated remote sessions detach on their next heartbeat;
+  older package versions ignore archive markers, so close or update all sessions first.
+  Manual recovery is documented in the README.
+- Stabilize the Linux multiprocess approval tests by publishing child result files
+  atomically; approval behavior in the extension is unchanged.
+
 ## [0.2.2] - 2026-11-05
 
 - CI no longer hangs: a multi-process test compared directory listings in a fixed order

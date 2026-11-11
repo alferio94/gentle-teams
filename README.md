@@ -20,7 +20,7 @@ you stay in control of every change.
 - **Live team status.** See who is active, idle, or offline, and what is waiting for you.
 - **Works in plain Pi and in Gentle Shell.** No server and no account: everything is local files.
 
-> Status: early development (0.2.2). Requires Node.js 23.6 or later.
+> Status: early development (0.3.0). Requires Node.js 23.6 or later.
 
 ## Contents
 
@@ -205,9 +205,24 @@ requests.
 | `r` | List the team's requests; `enter` shows a request's history |
 | `a` / `d` | Accept or decline a change waiting for your decision |
 | `p` | Remove closed requests older than 7 days, after confirming |
+| `x` | Archive the selected team, after confirming |
 | `esc` | Close |
 
 Each session can only make its own repository leave. The command needs interactive mode.
+
+### Archive a team
+
+Close or update **all** sessions using this store before archiving: older package versions
+ignore archive markers and can still write to archived teams. Resolve or cancel open
+requests, then select the team in `/teams` and press `x`. Confirmation unbinds idle or
+disconnected sessions, including this session if applicable, without closing terminals or
+conversations. Working sessions block archive. History, configuration and repositories
+are preserved; the team name stays reserved.
+
+For manual recovery, first stop all sessions. Remove only
+`~/.pi/multiagent/teams/<team>/.archived.json`, then start updated sessions again. Stopping
+all sessions first ensures old presence claim tokens cannot be reused. Do not remove the
+team directory or its contents.
 
 ## Agent tools
 

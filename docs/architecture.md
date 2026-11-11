@@ -47,7 +47,8 @@ Root: `~/.pi/multiagent/` (directories `0700`, files `0600`, same OS user only).
     <team-name>/           # the name is the ID; creation is atomic, so names are unique
       team.json            # name, description, createdAt
       .claim-<sha256>       # repository claim; member file remains the source of truth
-      .lock-members         # serializes joins and leaves; released afterwards
+      .lock-members         # serializes membership, request admission, presence and archive
+      .archived.json        # optional archive marker; team and history remain in place
       members/
         <alias>.json            # alias, repositoryRoot, joinedAt
       presence/
@@ -78,6 +79,13 @@ Write rules:
   repository claim with `link(2)` and a successful leave releases it. Member files
   remain authoritative, including for teams created before claims existed; an
   orphaned claim from an interrupted join can be replaced under the lock.
+- Archive publishes `.archived.json` under the membership lock after checking presence
+  and request state. Names remain reserved and normal listings exclude marked teams.
+  Presence mutations take the membership lock before their per-alias lock; request
+  admission and membership mutations use the same lock and revalidate active status.
+  Stop or update all sessions before archive: older versions ignore this marker. To
+  recover manually, stop all sessions so old presence tokens cannot be reused, and remove
+  only `~/.pi/multiagent/teams/<team>/.archived.json`.
 - `request.json` is never rewritten. State is derived by replaying `events/`.
 - Event files are named only by sequence number, so concurrent writers compete for
   the same name. The loser re-reads the events, re-validates its transition against
@@ -476,7 +484,7 @@ long `ui_prompt_start` span; Gentle Shell 4.6 does not listen to it.
   admin       ~/personal/tienda/admin-repo       offline   —
 
  [ Join ]  [ Leave ]  [ Requests ]
- ←→ team  ↑↓ member  j join  l leave  r requests  p prune  n new  esc close
+ ←→ team ↑↓ member  j join l leave r requests p prune x archive n new esc close
 ```
 
 - **Full screen (S19)**: the screen is a `ctx.ui.custom()` overlay as wide and tall
@@ -534,6 +542,10 @@ feedback line):
   session's member **sent** that is still `requested` is marked
   `awaiting <recipient>, a/d on its behalf`; `a` / `d` append `accept` / `decline`
   as the recipient on its behalf (§5), and the recipient's session tells its model.
+- `x` **Archive** the selected team after confirmation. Working sessions, open
+  requests, and unreadable safety state prevent archive. Idle and disconnected sessions,
+  including this session, are unbound; terminals and conversations stay open. History and
+  repositories remain intact and cancellation changes nothing.
 - `p` **Clean up** the selected team (§3.1): the candidates are counted first.
   With none, the feedback line says
   `No closed requests older than 7 days in "<ws>"; nothing to remove.` and nothing is
