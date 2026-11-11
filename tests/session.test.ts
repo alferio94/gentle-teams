@@ -115,6 +115,41 @@ const within = <T>(promise: Promise<T>, ms = 2000): Promise<T> =>
 const exists = async (path: string) => readFile(path).then(() => true, () => false);
 const BIND_TITLE = "This repository is a member of a team. Bind this session to it?";
 
+test("archive fences a remote idle session and heartbeat detaches it", async () => {
+	const h = await harness();
+	try {
+		const decisions = new Map<string, { team: string; alias: string } | "declined">();
+		const session = createTeamSession(h.ports({ pid: process.pid, decisions }));
+		await session.bindTo(WS, "backend");
+		await h.store.archiveTeam(WS);
+		await h.timers[0]!.fn();
+		assert.equal(session.binding, undefined);
+		assert.equal(h.timers[0]!.cancelled, true);
+		assert.equal(h.watchers[0]!.stopped, true);
+		assert.equal(decisions.size, 0);
+		await session.shutdown();
+	} finally { await h.done(); }
+});
+
+test("transient heartbeat errors retain the binding", async () => {
+	const h = await harness();
+	try {
+		let transient = false;
+		const store: Store = { ...h.store, getTeam: async (name) => {
+			if (transient) throw new Error("temporary I/O error");
+			return h.store.getTeam(name);
+		} };
+		const session = createTeamSession(h.ports({ store }));
+		await session.bindTo(WS, "backend");
+		transient = true;
+		await h.timers[0]!.fn();
+		assert.deepEqual(session.binding, { team: WS, alias: "backend" });
+		assert.equal(h.timers[0]!.cancelled, false);
+		transient = false;
+		await session.shutdown();
+	} finally { await h.done(); }
+});
+
 test("S33 replaced footer with nondelegating digest immediately restores status", async () => {
  const h = await harness(); let clock = 0;
  const original = { render: (_width: number) => ["host"], invalidate() {}, digest: () => "host" };

@@ -87,11 +87,13 @@ export function openPresence(store: Store, options: PresenceOptions = {}): Prese
 	}
 
 	async function withLock<T>(ws: string, alias: string, fn: (dir: string) => Promise<T>): Promise<T> {
-		const dir = presenceDir(ws);
-		await mkdirPrivate(dir);
-		return withFileLock(dir, `.lock-${alias}`, () => fn(dir), {
-			pid, isProcessAlive, waitMs: lockWaitMs,
-			onTimeout: () => fail("store-busy", `Presence of member "${alias}" is locked by another session; retry.`),
+		return store.withActiveTeamLock(ws, async () => {
+			const dir = presenceDir(ws);
+			await mkdirPrivate(dir);
+			return withFileLock(dir, `.lock-${alias}`, () => fn(dir), {
+				pid, isProcessAlive, waitMs: lockWaitMs,
+				onTimeout: () => fail("store-busy", `Presence of member "${alias}" is locked by another session; retry.`),
+			});
 		});
 	}
 
@@ -126,6 +128,7 @@ export function openPresence(store: Store, options: PresenceOptions = {}): Prese
 		async claim(ws, alias, { sessionId, state = "idle" }) {
 			await requireMember(ws, alias);
 			return withLock(ws, alias, async (dir) => {
+				await requireMember(ws, alias);
 				const name = fileName(alias);
 				const mine = record(sessionId, state);
 				const k = key(ws, alias, sessionId);

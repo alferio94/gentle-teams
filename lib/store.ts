@@ -10,7 +10,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { withLock } from "./lock.ts";
-import { link, mkdir, readdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, readdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { ULID_PATTERN, ulid } from "./ids.ts";
@@ -132,6 +132,8 @@ export interface Store {
 	createTeam(input: { name: string; description?: string }): Promise<Team>;
 	listTeams(): Promise<Team[]>;
 	getTeam(name: string): Promise<Team>;
+	archiveTeam(name: string): Promise<void>;
+	withActiveTeamLock<T>(name: string, fn: () => Promise<T>): Promise<T>;
 	joinMember(team: string, input: { alias: string; repositoryRoot: string }): Promise<{ member: Member; resumed: boolean }>;
 	listMembers(team: string): Promise<Member[]>;
 	leaveMember(team: string, alias: string): Promise<void>;
@@ -241,7 +243,7 @@ async function listDir(dir: string): Promise<string[]> {
 	}
 }
 
-export function openStore(root: string = defaultRoot(), options: { afterRequestPublished?: () => Promise<void> } = {}): Store {
+export function openStore(root: string = defaultRoot(), options: { afterRequestPublished?: () => Promise<void>; beforeArchivePublished?: () => Promise<void> } = {}): Store {
 	const teamsDir = join(root, "teams");
 	const wsDir = (name: string) => join(teamsDir, name);
 	const membersDir = (ws: string) => join(wsDir(ws), "members");
@@ -255,7 +257,19 @@ export function openStore(root: string = defaultRoot(), options: { afterRequestP
 
 	async function getTeam(name: string): Promise<Team> {
 		const found = NAME_PATTERN.test(name) ? await readJson<Team>(join(wsDir(name), "team.json")) : undefined;
-		return found ?? fail("unknown-team", `Team "${name}" does not exist.`);
+		if (found) {
+			const archived = await lstat(join(wsDir(name), ".archived.json")).then(() => true, (error: unknown) => {
+				if (hasCode(error, "ENOENT")) return false;
+				throw error;
+			});
+			if (!archived) return found;
+		}
+		return fail("unknown-team", `Team "${name}" does not exist.`);
+	}
+
+	async function withActiveTeamLock<T>(ws: string, fn: () => Promise<T>): Promise<T> {
+		await getTeam(ws);
+		return membersLock(ws, async () => { await getTeam(ws); return fn(); });
 	}
 
 	async function listMembers(ws: string): Promise<Member[]> {
@@ -360,14 +374,63 @@ export function openStore(root: string = defaultRoot(), options: { afterRequestP
 		async listTeams() {
 			const teams: Team[] = [];
 			for (const name of await listDir(teamsDir)) {
-				const team = NAME_PATTERN.test(name) ? await readJson<Team>(join(wsDir(name), "team.json")) : undefined;
-				if (team) teams.push(team);
+				try {
+					if (NAME_PATTERN.test(name)) teams.push(await getTeam(name));
+				} catch (error) {
+					if (!(error instanceof TeamStoreError && error.code === "unknown-team")) throw error;
+				}
 			}
 			return teams;
 		},
 
 		getTeam,
 		listMembers,
+		withActiveTeamLock,
+
+		async archiveTeam(ws) {
+			await withActiveTeamLock(ws, async () => {
+				// Inspect every visible request rather than the forgiving delivery listing.
+				for (const id of await readdir(requestsDir(ws))) {
+					if (id.startsWith(".tmp-") || id.startsWith(".hidden-") || id.startsWith(".trash-")) {
+						fail("corrupted-store", `Request storage in team "${ws}" requires recovery before archiving.`);
+					}
+					if (!ULID_PATTERN.test(id)) fail("corrupted-store", `Invalid request entry ${id}.`);
+					const view = await readRequest(ws, id);
+					const record = view.record;
+					if (!REQUEST_KINDS.includes(record.kind) || typeof record.from !== "string" || !ALIAS_PATTERN.test(record.from) || typeof record.to !== "string" || !ALIAS_PATTERN.test(record.to) || record.from === record.to || typeof record.title !== "string" || !record.title.trim() || typeof record.body !== "string" || !Array.isArray(record.dependsOn) || record.dependsOn.some((dep) => typeof dep !== "string" || !ULID_PATTERN.test(dep)) || typeof record.createdAt !== "string" || !Number.isFinite(Date.parse(record.createdAt))) {
+						fail("corrupted-store", `Invalid request record ${id}.`);
+					}
+					for (const event of view.events) {
+						if ((event.role === "requester" ? record.from : event.role === "recipient" ? record.to : undefined) !== event.actor || typeof event.at !== "string" || !Number.isFinite(Date.parse(event.at))) {
+							fail("corrupted-store", `Invalid event in request ${id}.`);
+						}
+					}
+					const names = await readdir(eventsDir(ws, id));
+					if (names.some((name) => !EVENT_FILE.test(name))) fail("corrupted-store", `Invalid event entry in request ${id}.`);
+					if (!isTerminal(view.state)) fail("open-requests", `Team "${ws}" has open requests; resolve or cancel them before archiving.`);
+				}
+				const dir = join(wsDir(ws), "presence");
+				let names: string[];
+				try { names = await readdir(dir); } catch (error) {
+					if (!hasCode(error, "ENOENT")) throw error;
+					names = [];
+				}
+				for (const name of names) {
+					if (name.startsWith(".")) fail("corrupted-store", `Presence storage in team "${ws}" requires recovery before archiving.`);
+					const current = await readJson<{ sessionId: string; pid: number; state: string; heartbeatAt: string; token: string }>(join(dir, name));
+					if (!name.endsWith(".json") || !ALIAS_PATTERN.test(name.slice(0, -5)) || !current || typeof current.sessionId !== "string" || typeof current.token !== "string" || !Number.isSafeInteger(current.pid) || current.pid <= 0 || !["active", "idle"].includes(current.state) || !Number.isFinite(Date.parse(current.heartbeatAt))) {
+						return fail("corrupted-store", `Invalid presence entry ${name}.`);
+					}
+					let alive = false;
+					try { process.kill(current.pid, 0); alive = true; } catch (error) { if (!hasCode(error, "ESRCH")) alive = true; }
+					if (current.state === "active" && (alive || Date.now() - Date.parse(current.heartbeatAt) <= 15_000)) fail("member-bound", `Team "${ws}" has working sessions; wait until they are idle before archiving.`);
+				}
+				await options.beforeArchivePublished?.();
+				if (!(await publishFile(wsDir(ws), ".archived.json", json({ archivedAt: new Date().toISOString() })))) {
+					fail("unknown-team", `Team "${ws}" does not exist.`);
+				}
+			});
+		},
 
 		async joinMember(ws, { alias, repositoryRoot }) {
 			if (!ALIAS_PATTERN.test(alias)) {
@@ -412,6 +475,7 @@ export function openStore(root: string = defaultRoot(), options: { afterRequestP
 			const unknown = () => fail("unknown-member", `Member "${alias}" is not part of team "${ws}".`);
 			if (!ALIAS_PATTERN.test(alias)) unknown();
 			return membersLock(ws, async () => {
+			await getTeam(ws);
 			const live = join(membersDir(ws), `${alias}.json`);
 			const hidden = join(membersDir(ws), hiddenName());
 
@@ -454,7 +518,7 @@ export function openStore(root: string = defaultRoot(), options: { afterRequestP
 		},
 
 		async createRequest(ws, input) {
-			await getTeam(ws);
+			return withActiveTeamLock(ws, async () => {
 			if (!(REQUEST_KINDS as readonly string[]).includes(input.kind)) {
 				fail("invalid-kind", `Request kind "${input.kind}" is invalid: use "question" or "change".`);
 			}
@@ -529,6 +593,7 @@ export function openStore(root: string = defaultRoot(), options: { afterRequestP
 				}
 			}
 			return record;
+			});
 		},
 
 		readRequest,

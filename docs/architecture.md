@@ -47,7 +47,8 @@ Root: `~/.pi/multiagent/` (directories `0700`, files `0600`, same OS user only).
     <team-name>/           # the name is the ID; creation is atomic, so names are unique
       team.json            # name, description, createdAt
       .claim-<sha256>       # repository claim; member file remains the source of truth
-      .lock-members         # serializes joins and leaves; released afterwards
+      .lock-members         # serializes membership, request admission, presence and archive
+      .archived.json        # optional archive marker; team and history remain in place
       members/
         <alias>.json            # alias, repositoryRoot, joinedAt
       presence/
@@ -78,6 +79,13 @@ Write rules:
   repository claim with `link(2)` and a successful leave releases it. Member files
   remain authoritative, including for teams created before claims existed; an
   orphaned claim from an interrupted join can be replaced under the lock.
+- Archive publishes `.archived.json` under the membership lock after checking presence
+  and request state. Names remain reserved and normal listings exclude marked teams.
+  Presence mutations take the membership lock before their per-alias lock; request
+  admission and membership mutations use the same lock and revalidate active status.
+  Stop or update all sessions before archive: older versions ignore this marker. To
+  recover manually, stop all sessions so old presence tokens cannot be reused, and remove
+  only `~/.pi/multiagent/teams/<team>/.archived.json`.
 - `request.json` is never rewritten. State is derived by replaying `events/`.
 - Event files are named only by sequence number, so concurrent writers compete for
   the same name. The loser re-reads the events, re-validates its transition against
