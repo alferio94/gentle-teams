@@ -10,6 +10,8 @@
 - Archived names remain reserved. Updated remote sessions detach on their next heartbeat;
   older package versions ignore archive markers, so close or update all sessions first.
   Manual recovery is documented in the README.
+- Stabilize the Linux multiprocess approval tests by publishing child result files
+  atomically; approval behavior in the extension is unchanged.
 
 ## [0.2.2] - 2026-11-05
 

@@ -484,7 +484,7 @@ long `ui_prompt_start` span; Gentle Shell 4.6 does not listen to it.
   admin       ~/personal/tienda/admin-repo       offline   —
 
  [ Join ]  [ Leave ]  [ Requests ]
- ←→ team  ↑↓ member  j join  l leave  r requests  p prune  n new  esc close
+ ←→ team ↑↓ member  j join l leave r requests p prune x archive n new esc close
 ```
 
 - **Full screen (S19)**: the screen is a `ctx.ui.custom()` overlay as wide and tall
@@ -542,6 +542,10 @@ feedback line):
   session's member **sent** that is still `requested` is marked
   `awaiting <recipient>, a/d on its behalf`; `a` / `d` append `accept` / `decline`
   as the recipient on its behalf (§5), and the recipient's session tells its model.
+- `x` **Archive** the selected team after confirmation. Working sessions, open
+  requests, and unreadable safety state prevent archive. Idle and disconnected sessions,
+  including this session, are unbound; terminals and conversations stay open. History and
+  repositories remain intact and cancellation changes nothing.
 - `p` **Clean up** the selected team (§3.1): the candidates are counted first.
   With none, the feedback line says
   `No closed requests older than 7 days in "<ws>"; nothing to remove.` and nothing is

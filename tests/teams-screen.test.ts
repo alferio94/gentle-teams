@@ -94,7 +94,7 @@ test("S13 members view at width 90 matches the §7 layout", () => {
 		" [ Join ]  [ Leave ]  [ Requests ]",
 		" " + FOOTER,
 	]);
-	assert.equal(FOOTER, "←→ team  ↑↓ member  j join  l leave  r requests  p prune  n new  esc close");
+	assert.equal(FOOTER, "←→ team ↑↓ member  j join l leave r requests p prune x archive n new esc close");
 });
 
 test("S13 tab markers: ★ bound here, ⊙ other members live, none otherwise; ▾ marks the selected tab", () => {
@@ -198,7 +198,7 @@ test("S14 j, l, n, esc return actions; r opens the requests view", () => {
 	assert.equal(requests.action, undefined);
 	assert.equal(requests.state.view, "requests");
 	assert.equal(keys(start, "right", "l").action, undefined, "no member to leave");
-	assert.equal(keys(start, "x").action, undefined);
+	assert.deepEqual(keys(start, "x").action, { type: "archive", team: "tienda-online" });
 });
 
 test("S13 empty state: only n and esc act", () => {

@@ -5,6 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openStore } from "../lib/store.ts";
 import { openPresence } from "../lib/presence.ts";
+import { handleKey, screenState } from "../lib/ui/teams-screen.ts";
+
+test("S1: members view exposes archive for the selected team only", () => {
+	const state = screenState({ tabs: [{ name: "example", description: "", bound: false, live: false, members: [], requests: [] }], thisSession: {} });
+	assert.deepEqual(handleKey(state, "x").action, { type: "archive", team: "example" });
+	assert.equal(handleKey({ ...state, view: "requests" }, "x").action, undefined);
+});
 
 test("S2: archive hides the team while preserving its files and reserving its name", async () => {
 	const base = await mkdtemp(join(tmpdir(), "teams-archive-"));
