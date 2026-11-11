@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -19,19 +19,53 @@ const ROUNDS = 20;
 const approvalsUrl = pathToFileURL(join(import.meta.dirname, "..", "lib", "approvals.ts")).href;
 const storeUrl = pathToFileURL(join(import.meta.dirname, "..", "lib", "store.ts")).href;
 
+/** Publish a child result only after the complete JSON has been written. */
+async function publishResult(final: string, temporary: string, json: string, write = writeFile) {
+	await write(temporary, json);
+	await rename(temporary, final);
+}
+
+test("child results are invisible until their JSON is fully written", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "gentle-teams-result-"));
+	let release!: () => void;
+	let started!: () => void;
+	const barrier = new Promise<void>((resolve) => { release = resolve; });
+	const writing = new Promise<void>((resolve) => { started = resolve; });
+	try {
+		const final = join(dir, "result-0-backend");
+		const pending = publishResult(final, join(dir, "pending-0-backend"), '{"won":true}', async (path, data) => {
+			await writeFile(path, "");
+			started();
+			await barrier;
+			await writeFile(path, data);
+		});
+		await writing;
+		try {
+			assert.deepEqual((await readdir(dir)).filter((name) => name.startsWith("result-")), []);
+		} finally {
+			release();
+			await pending;
+		}
+		assert.deepEqual(JSON.parse(await readFile(final, "utf8")), { won: true });
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
 /** Child: for each round, wait for the go file, answer, and write its result. */
 const CHILD = `
 const [root, ws, requestId, dir, who, choice, idsJson] = process.argv.slice(1);
 const { openStore } = await import(${JSON.stringify(storeUrl)});
 const { decideApproval } = await import(${JSON.stringify(approvalsUrl)});
 const { existsSync } = await import("node:fs");
-const { writeFile } = await import("node:fs/promises");
+const { rename, writeFile } = await import("node:fs/promises");
+const publishResult = ${publishResult.toString()};
 const store = openStore(root);
 const ids = JSON.parse(idsJson);
 for (let round = 0; round < ids.length; round++) {
 	while (!existsSync(dir + "/go-" + round)) await new Promise((r) => setTimeout(r, 1));
 	const result = await decideApproval(store, ws, requestId, ids[round], { choice, decidedBy: who });
-	await writeFile(dir + "/result-" + round + "-" + who, JSON.stringify(result));
+	await publishResult(dir + "/result-" + round + "-" + who, dir + "/pending-" + round + "-" + who, JSON.stringify(result));
 }
 `;
 
